@@ -213,6 +213,7 @@ ssh_kex2(struct ssh *ssh, char *host, struct sockaddr *hostaddr, u_short port)
 # endif
 #endif
 	ssh->kex->kex[KEX_C25519_SHA256] = kexc25519_client;
+    ssh->kex->kex[KEX_KEM_SNTRUP4591761X25519_SHA512] = kexkem_client;
 	ssh->kex->verify_host_key=&verify_host_key_callback;
 
 	ssh_dispatch_run_fatal(ssh, DISPATCH_BLOCK, &ssh->kex->done);

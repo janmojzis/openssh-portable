@@ -128,6 +128,7 @@ ssh_init(struct ssh **sshp, int is_server, struct kex_params *kex_params)
 # endif
 #endif /* WITH_OPENSSL */
 		ssh->kex->kex[KEX_C25519_SHA256] = kexc25519_client;
+		ssh->kex->kex[KEX_KEM_SNTRUP4591761X25519_SHA512] = kexkem_client;
 		ssh->kex->verify_host_key =&_ssh_verify_host_key;
 	}
 	*sshp = ssh;

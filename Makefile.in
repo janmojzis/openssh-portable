@@ -100,6 +100,7 @@ LIBSSH_OBJS=${LIBOPENSSH_OBJS} \
 	kex.o kexdh.o kexgex.o kexecdh.o kexc25519.o \
 	kexdhc.o kexgexc.o kexecdhc.o kexc25519c.o \
 	kexdhs.o kexgexs.o kexecdhs.o kexc25519s.o \
+	kexkem.o kexkemc.o crypto_kem_sntrup4591761.o crypto_kem_sntrup4591761x25519.o \
 	platform-pledge.o platform-tracing.o platform-misc.o
 
 SSHOBJS= ssh.o readconf.o clientloop.o sshtty.o \

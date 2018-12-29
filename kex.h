@@ -62,6 +62,7 @@
 #define	KEX_ECDH_SHA2_NISTP521		"ecdh-sha2-nistp521"
 #define	KEX_CURVE25519_SHA256		"curve25519-sha256"
 #define	KEX_CURVE25519_SHA256_OLD	"curve25519-sha256@libssh.org"
+#define KEX_SNTRUP4591761X25519_SHA512 "sntrup4591761x25519-sha512@tinyssh.org"
 
 #define COMP_NONE	0
 /* pre-auth compression (COMP_ZLIB) is only supported in the client */
@@ -69,6 +70,10 @@
 #define COMP_DELAYED	2
 
 #define CURVE25519_SIZE 32
+
+/* XXX */
+#define KEM_SECRETKEYMAX 1632 /* XXX crypto_sntrup4591761x25519_SECRETKEYBYTES */
+#define KEM_PUBLICKEYMAX 1250 /* XXX crypto_kem_sntrup4591761x25519_PUBLICKEYBYTES */
 
 enum kex_init_proposals {
 	PROPOSAL_KEX_ALGS,
@@ -100,6 +105,7 @@ enum kex_exchange {
 	KEX_DH_GEX_SHA256,
 	KEX_ECDH_SHA2,
 	KEX_C25519_SHA256,
+    KEX_KEM_SNTRUP4591761X25519_SHA512,
 	KEX_MAX
 };
 
@@ -166,6 +172,10 @@ struct kex {
 	const EC_GROUP *ec_group;	/* ECDH */
 	u_char c25519_client_key[CURVE25519_SIZE]; /* 25519 */
 	u_char c25519_client_pubkey[CURVE25519_SIZE]; /* 25519 */
+    u_char kem_client_key[KEM_SECRETKEYMAX];
+    size_t kem_client_keylen;
+    u_char kem_client_pubkey[KEM_PUBLICKEYMAX];
+    size_t kem_client_pubkeylen;
 };
 
 int	 kex_names_valid(const char *);
@@ -201,6 +211,7 @@ int	 kexecdh_client(struct ssh *);
 int	 kexecdh_server(struct ssh *);
 int	 kexc25519_client(struct ssh *);
 int	 kexc25519_server(struct ssh *);
+int	 kexkem_client(struct ssh *);
 
 int	 kex_dh_hash(int, const struct sshbuf *, const struct sshbuf *,
     const u_char *, size_t, const u_char *, size_t, const u_char *, size_t,
@@ -222,6 +233,18 @@ int	 kex_c25519_hash(int, const struct sshbuf *, const struct sshbuf *,
     const u_char *, size_t, const u_char *, size_t,
     const u_char *, size_t, const u_char *, const u_char *,
     const u_char *, size_t, u_char *, size_t *);
+
+int kex_kem_hash(
+    int,
+    const struct sshbuf *,
+    const struct sshbuf *,
+    const u_char *, size_t,
+    const u_char *, size_t,
+    const u_char *, size_t,
+    const u_char *, size_t,
+    const u_char *, size_t,
+    const u_char *, size_t,
+    u_char *, size_t *);
 
 void	kexc25519_keygen(u_char key[CURVE25519_SIZE], u_char pub[CURVE25519_SIZE])
 	__attribute__((__bounded__(__minbytes__, 1, CURVE25519_SIZE)))

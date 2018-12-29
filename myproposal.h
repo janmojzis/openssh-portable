@@ -90,8 +90,13 @@
 # else
 #  define KEX_CURVE25519_METHODS ""
 # endif
+
+#define KEX_KEM_METHODS \
+    "sntrup4591761x25519-sha512@tinyssh.org,"
+
 #define KEX_COMMON_KEX \
 	KEX_CURVE25519_METHODS \
+	KEX_KEM_METHODS \
 	KEX_ECDH_METHODS \
 	KEX_SHA2_METHODS
 
@@ -153,7 +158,8 @@
 
 #define KEX_SERVER_KEX		\
 	"curve25519-sha256," \
-	"curve25519-sha256@libssh.org"
+	"curve25519-sha256@libssh.org," \
+	"sntrup4591761x25519-sha512@tinyssh.org"
 #define	KEX_DEFAULT_PK_ALG	\
 	"ssh-ed25519-cert-v01@openssh.com," \
 	"ssh-ed25519"
