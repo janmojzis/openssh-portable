@@ -31,13 +31,13 @@ kex_kem_hash(
     const u_char *kex_key, size_t kex_keylen,
     u_char *hash, size_t *hashlen)
 {
-	struct sshbuf *b;
-	int r;
+    struct sshbuf *b;
+    int r;
 
-	if (*hashlen < ssh_digest_bytes(hash_alg))
-		return SSH_ERR_INVALID_ARGUMENT;
-	if ((b = sshbuf_new()) == NULL)
-		return SSH_ERR_ALLOC_FAIL;
+    if (*hashlen < ssh_digest_bytes(hash_alg))
+        return SSH_ERR_INVALID_ARGUMENT;
+    if ((b = sshbuf_new()) == NULL)
+        return SSH_ERR_ALLOC_FAIL;
     if ((r = sshbuf_put_stringb(b, client_version)) < 0 ||
         (r = sshbuf_put_stringb(b, server_version)) < 0 ||
         /* kexinit messages: fake header: len+SSH2_MSG_KEXINIT */
@@ -55,16 +55,16 @@ kex_kem_hash(
         return r;
     }
 #ifdef DEBUG_KEX
-	sshbuf_dump(b, stderr);
+    sshbuf_dump(b, stderr);
 #endif
-	if (ssh_digest_buffer(hash_alg, b, hash, *hashlen) != 0) {
-		sshbuf_free(b);
-		return SSH_ERR_LIBCRYPTO_ERROR;
-	}
-	sshbuf_free(b);
-	*hashlen = ssh_digest_bytes(hash_alg);
+    if (ssh_digest_buffer(hash_alg, b, hash, *hashlen) != 0) {
+        sshbuf_free(b);
+        return SSH_ERR_LIBCRYPTO_ERROR;
+    }
+    sshbuf_free(b);
+    *hashlen = ssh_digest_bytes(hash_alg);
 #ifdef DEBUG_KEX
-	dump_digest("hash", hash, *hashlen);
+    dump_digest("hash", hash, *hashlen);
 #endif
-	return 0;
+    return 0;
 }
