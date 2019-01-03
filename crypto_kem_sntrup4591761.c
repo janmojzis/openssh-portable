@@ -1,50 +1,34 @@
 /*
-sntrup4591761 experiment
-
-libpqcrypto-20180314/crypto_kem/sntrup4591761/ref/
-
-all-in-one-file created using script:
-
-rm crypto_kem_sntrup4591761.c
-(
-  echo '#include <string.h>'
-  echo '#include <stdint.h>'
-  echo '#include "randombytes.h"'
-  echo '#include "crypto_hash_sha512.h"'
-  echo '#include "crypto_verify_32.h"'
-
-  echo 'typedef uint32_t crypto_uint32;'
-  echo 'typedef uint16_t crypto_uint16;'
-  echo 'typedef int32_t crypto_int32;'
-  echo 'typedef int16_t crypto_int16;'
-  echo 'typedef int8_t crypto_int8;'
-
-  (
-  for file in int32_sort.c params.h small.h swap.h mod3.h modq.h r3.h rq.h ; do 
-    cat "${file}"
-  done
-  for file in `ls *.c | grep -v int32_sort.c`; do 
-    cat "${file}"
-  done
-  ) | grep -v '^#include'
-) | sed 's/crypto_kem/crypto_kem_sntrup4591761_tinynacl/g' > crypto_kem_sntrup4591761.c.tmp
-mv -f crypto_kem_sntrup4591761.c.tmp crypto_kem_sntrup4591761.c
-
+Original code: libpqcrypto-20180314/crypto_kem/sntrup4591761/ref
+Modifications (Jan Mojzis):
+- source code merged into single file
+- crypto_kem renamed to crypto_kem_sntrup4591761_openssh
 */
 
+/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
 #include <string.h>
-#include <stdint.h>
-#include "crypto_api.h"
-/*#include "randombytes.h"
+#if 0
+#include "crypto_uint32.h"
+#include "crypto_uint16.h"
+#include "crypto_int32.h"
+#include "crypto_int16.h"
+#include "crypto_int8.h"
+#include "randombytes.h"
+#include "crypto_verify_32.h"
 #include "crypto_hash_sha512.h"
-#include "crypto_verify_32.h"*/
+#else
+#include <stdint.h>
 typedef uint32_t crypto_uint32;
 typedef uint16_t crypto_uint16;
 typedef int32_t crypto_int32;
 typedef int16_t crypto_int16;
 typedef int8_t crypto_int8;
+#include "crypto_api.h"
+#endif
 #include "crypto_kem_sntrup4591761.h"
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* int32_sort.c */
 
 
 static void minmax(crypto_int32 *x,crypto_int32 *y)
@@ -61,7 +45,7 @@ static void minmax(crypto_int32 *x,crypto_int32 *y)
   *y = yi ^ c;
 }
 
-void int32_sort(crypto_int32 *x,int n)
+static void int32_sort(crypto_int32 *x,int n)
 {
   int top,p,q,i;
 
@@ -79,6 +63,29 @@ void int32_sort(crypto_int32 *x,int n)
           minmax(x + i + p,x + i + q);
   }
 }
+
+/* swap.c */
+
+
+static void swap(void *x,void *y,int bytes,int mask)
+{
+  int i;
+  char xi, yi, c, t;
+
+  c = mask;
+  
+  for (i = 0;i < bytes;++i) {
+    xi = i[(char *) x];
+    yi = i[(char *) y];
+    t = c & (xi ^ yi);
+    xi ^= t;
+    yi ^= t;
+    i[(char *) x] = xi;
+    i[(char *) y] = yi;
+  }
+}
+
+/* params.h */
 #ifndef params_h
 #define params_h
 
@@ -93,29 +100,102 @@ void int32_sort(crypto_int32 *x,int n)
 #define small_encode_len 191
 
 #endif
-#ifndef small_h
-#define small_h
 
-
+/* small.h */
 typedef crypto_int8 small;
 
-extern void small_encode(unsigned char *,const small *);
+/* small.c */
 
-extern void small_decode(small *,const unsigned char *);
 
-extern crypto_int32 small_random32(void);
+/* XXX: these functions rely on p mod 4 = 1 */
 
-extern void small_random(small *);
+/* all coefficients in -1, 0, 1 */
+static void small_encode(unsigned char *c,const small *f)
+{
+  small c0;
+  int i;
 
-extern void small_random_weightw(small *);
+  for (i = 0;i < p/4;++i) {
+    c0 = *f++ + 1;
+    c0 += (*f++ + 1) << 2;
+    c0 += (*f++ + 1) << 4;
+    c0 += (*f++ + 1) << 6;
+    *c++ = c0;
+  }
+  c0 = *f++ + 1;
+  *c++ = c0;
+}
 
+static void small_decode(small *f,const unsigned char *c)
+{
+  unsigned char c0;
+  int i;
+
+  for (i = 0;i < p/4;++i) {
+    c0 = *c++;
+    *f++ = ((small) (c0 & 3)) - 1; c0 >>= 2;
+    *f++ = ((small) (c0 & 3)) - 1; c0 >>= 2;
+    *f++ = ((small) (c0 & 3)) - 1; c0 >>= 2;
+    *f++ = ((small) (c0 & 3)) - 1;
+  }
+  c0 = *c++;
+  *f++ = ((small) (c0 & 3)) - 1;
+}
+
+/* random32.c */
+
+
+#ifdef KAT
+/* NIST KAT generator fails to provide chunk-independence */
+static unsigned char x[4*761];
+static long long pos = 4*761;
 #endif
-#ifndef swap_h
-#define swap_h
 
-extern void swap(void *,void *,int,int);
-
+static crypto_int32 small_random32(void)
+{
+#ifdef KAT
+  if (pos == 4*761) {
+    randombytes(x,sizeof x);
+    pos = 0;
+  }
+  pos += 4;
+  return x[pos - 4] + (x[pos - 3] << 8) + (x[pos - 2] << 16) + (x[pos - 1] << 24);
+#else
+  unsigned char x[4];
+  randombytes(x,4);
+  return x[0] + (x[1] << 8) + (x[2] << 16) + (x[3] << 24);
 #endif
+}
+
+/* randomsmall.c */
+
+
+static void small_random(small *g)
+{
+  int i;
+
+  for (i = 0;i < p;++i) {
+    crypto_uint32 r = small_random32();
+    g[i] = (small) (((1073741823 & r) * 3) >> 30) - 1;
+  }
+}
+
+/* randomweightw.c */
+
+
+static void small_random_weightw(small *f)
+{
+  crypto_int32 r[p];
+  int i;
+
+  for (i = 0;i < p;++i) r[i] = small_random32();
+  for (i = 0;i < w;++i) r[i] &= -2;
+  for (i = w;i < p;++i) r[i] = (r[i] & -3) | 1;
+  int32_sort(r,p);
+  for (i = 0;i < p;++i) f[i] = ((small) (r[i] & 3)) - 1;
+}
+
+/* mod3.h */
 #ifndef mod3_h
 #define mod3_h
 
@@ -174,268 +254,11 @@ static inline small mod3_quotient(small num,small den)
 }
 
 #endif
-#ifndef modq_h
-#define modq_h
+
+/* r3_mult.c */
 
 
-typedef crypto_int16 modq;
-
-/* -1 if x is nonzero, 0 otherwise */
-static inline int modq_nonzero_mask(modq x)
-{
-  crypto_int32 r = (crypto_uint16) x;
-  r = -r;
-  r >>= 30;
-  return r;
-}
-
-/* input between -9000000 and 9000000 */
-/* output between -2295 and 2295 */
-static inline modq modq_freeze(crypto_int32 a)
-{
-  a -= 4591 * ((228 * a) >> 20);
-  a -= 4591 * ((58470 * a + 134217728) >> 28);
-  return a;
-}
-
-static inline modq modq_minusproduct(modq a,modq b,modq c)
-{
-  crypto_int32 A = a;
-  crypto_int32 B = b;
-  crypto_int32 C = c;
-  return modq_freeze(A - B * C);
-}
-
-static inline modq modq_plusproduct(modq a,modq b,modq c)
-{
-  crypto_int32 A = a;
-  crypto_int32 B = b;
-  crypto_int32 C = c;
-  return modq_freeze(A + B * C);
-}
-
-static inline modq modq_product(modq a,modq b)
-{
-  crypto_int32 A = a;
-  crypto_int32 B = b;
-  return modq_freeze(A * B);
-}
-
-static inline modq modq_square(modq a)
-{
-  crypto_int32 A = a;
-  return modq_freeze(A * A);
-}
-
-static inline modq modq_sum(modq a,modq b)
-{
-  crypto_int32 A = a;
-  crypto_int32 B = b;
-  return modq_freeze(A + B);
-}
-
-static inline modq modq_reciprocal(modq a1)
-{
-  modq a2 = modq_square(a1);
-  modq a3 = modq_product(a2,a1);
-  modq a4 = modq_square(a2);
-  modq a8 = modq_square(a4);
-  modq a16 = modq_square(a8);
-  modq a32 = modq_square(a16);
-  modq a35 = modq_product(a32,a3);
-  modq a70 = modq_square(a35);
-  modq a140 = modq_square(a70);
-  modq a143 = modq_product(a140,a3);
-  modq a286 = modq_square(a143);
-  modq a572 = modq_square(a286);
-  modq a1144 = modq_square(a572);
-  modq a1147 = modq_product(a1144,a3);
-  modq a2294 = modq_square(a1147);
-  modq a4588 = modq_square(a2294);
-  modq a4589 = modq_product(a4588,a1);
-  return a4589;
-}
-
-static inline modq modq_quotient(modq num,modq den)
-{
-  return modq_product(num,modq_reciprocal(den));
-}
-
-#endif
-#ifndef r3_h
-#define r3_h
-
-
-extern void r3_mult(small *,const small *,const small *);
-
-extern int r3_recip(small *,const small *);
-
-#endif
-#ifndef rq_h
-#define rq_h
-
-
-extern void rq_encode(unsigned char *,const modq *);
-
-extern void rq_decode(modq *,const unsigned char *);
-
-extern void rq_encoderounded(unsigned char *,const modq *);
-
-extern void rq_decoderounded(modq *,const unsigned char *);
-
-extern void rq_round3(modq *,const modq *);
-
-extern void rq_mult(modq *,const modq *,const small *);
-
-int rq_recip3(modq *,const small *);
-
-#endif
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
-
-#ifdef KAT
-#endif
-
-
-int crypto_kem_sntrup4591761_tinynacl_dec(
-  unsigned char *k,
-  const unsigned char *cstr,
-  const unsigned char *sk
-)
-{
-  small f[p];
-  modq h[p];
-  small grecip[p];
-  modq c[p];
-  modq t[p];
-  small t3[p];
-  small r[p];
-  modq hr[p];
-  unsigned char rstr[small_encode_len];
-  unsigned char hash[64];
-  int i;
-  int result = 0;
-  int weight;
-
-  small_decode(f,sk);
-  small_decode(grecip,sk + small_encode_len);
-  rq_decode(h,sk + 2 * small_encode_len);
-
-  rq_decoderounded(c,cstr + 32);
-
-  rq_mult(t,c,f);
-  for (i = 0;i < p;++i) t3[i] = mod3_freeze(modq_freeze(3*t[i]));
-
-  r3_mult(r,t3,grecip);
-
-#ifdef KAT
-  {
-    int j;
-    printf("decrypt r:");
-    for (j = 0;j < p;++j)
-      if (r[j] == 1) printf(" +%d",j);
-      else if (r[j] == -1) printf(" -%d",j);
-    printf("\n");
-  }
-#endif
-
-  weight = 0;
-  for (i = 0;i < p;++i) weight += (1 & r[i]);
-  weight -= w;
-  result |= modq_nonzero_mask(weight); /* XXX: puts limit on p */
-
-  rq_mult(hr,h,r);
-  rq_round3(hr,hr);
-  for (i = 0;i < p;++i) result |= modq_nonzero_mask(hr[i] - c[i]);
-
-  small_encode(rstr,r);
-  crypto_hash_sha512(hash,rstr,sizeof rstr);
-  result |= crypto_verify_32(hash,cstr);
-
-  for (i = 0;i < 32;++i) k[i] = (hash[32 + i] & ~result);
-  return result;
-}
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
-
-#ifdef KAT
-#endif
-
-
-int crypto_kem_sntrup4591761_tinynacl_enc(
-  unsigned char *cstr,
-  unsigned char *k,
-  const unsigned char *pk
-)
-{
-  small r[p];
-  modq h[p];
-  modq c[p];
-  unsigned char rstr[small_encode_len];
-  unsigned char hash[64];
-
-  small_random_weightw(r);
-
-#ifdef KAT
-  {
-    int i;
-    printf("encrypt r:");
-    for (i = 0;i < p;++i)
-      if (r[i] == 1) printf(" +%d",i);
-      else if (r[i] == -1) printf(" -%d",i);
-    printf("\n");
-  }
-#endif
-
-  small_encode(rstr,r);
-  crypto_hash_sha512(hash,rstr,sizeof rstr);
-
-  rq_decode(h,pk);
-  rq_mult(c,h,r);
-  rq_round3(c,c);
-
-  memcpy(k,hash + 32,32);
-  memcpy(cstr,hash,32);
-  rq_encoderounded(cstr + 32,c);
-
-  return 0;
-}
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
-
-
-#if crypto_kem_sntrup4591761_tinynacl_PUBLICKEYBYTES != rq_encode_len
-#error "crypto_kem_sntrup4591761_tinynacl_PUBLICKEYBYTES must match rq_encode_len"
-#endif
-#if crypto_kem_sntrup4591761_tinynacl_SECRETKEYBYTES != rq_encode_len + 2 * small_encode_len
-#error "crypto_kem_sntrup4591761_tinynacl_SECRETKEYBYTES must match rq_encode_len + 2 * small_encode_len"
-#endif
-
-int crypto_kem_sntrup4591761_tinynacl_keypair(unsigned char *pk,unsigned char *sk)
-{
-  small g[p];
-  small grecip[p];
-  small f[p];
-  modq f3recip[p];
-  modq h[p];
-
-  do
-    small_random(g);
-  while (r3_recip(grecip,g) != 0);
-
-  small_random_weightw(f);
-  rq_recip3(f3recip,f);
-
-  rq_mult(h,f3recip,g);
-
-  rq_encode(pk,h);
-  small_encode(sk,f);
-  small_encode(sk + small_encode_len,grecip);
-  memcpy(sk + 2 * small_encode_len,pk,rq_encode_len);
-
-  return 0;
-}
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
-
-
-void r3_mult(small *h,const small *f,const small *g)
+static void r3_mult(small *h,const small *f,const small *g)
 {
   small fg[p + p - 1];
   small result;
@@ -462,7 +285,8 @@ void r3_mult(small *h,const small *f,const small *g)
   for (i = 0;i < p;++i)
     h[i] = fg[i];
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* r3_recip.c */
 
 
 /* caller must ensure that x-y does not overflow */
@@ -586,60 +410,101 @@ int r3_recip(small *r,const small *s)
   vectormod3_product(r,p,u + p,c);
   return smaller_mask(0,d);
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* modq.h */
+#ifndef modq_h
+#define modq_h
 
 
-#ifdef KAT
-/* NIST KAT generator fails to provide chunk-independence */
-static unsigned char x[4*761];
-static long long pos = 4*761;
+typedef crypto_int16 modq;
+
+/* -1 if x is nonzero, 0 otherwise */
+static inline int modq_nonzero_mask(modq x)
+{
+  crypto_int32 r = (crypto_uint16) x;
+  r = -r;
+  r >>= 30;
+  return r;
+}
+
+/* input between -9000000 and 9000000 */
+/* output between -2295 and 2295 */
+static inline modq modq_freeze(crypto_int32 a)
+{
+  a -= 4591 * ((228 * a) >> 20);
+  a -= 4591 * ((58470 * a + 134217728) >> 28);
+  return a;
+}
+
+static inline modq modq_minusproduct(modq a,modq b,modq c)
+{
+  crypto_int32 A = a;
+  crypto_int32 B = b;
+  crypto_int32 C = c;
+  return modq_freeze(A - B * C);
+}
+
+static inline modq modq_plusproduct(modq a,modq b,modq c)
+{
+  crypto_int32 A = a;
+  crypto_int32 B = b;
+  crypto_int32 C = c;
+  return modq_freeze(A + B * C);
+}
+
+static inline modq modq_product(modq a,modq b)
+{
+  crypto_int32 A = a;
+  crypto_int32 B = b;
+  return modq_freeze(A * B);
+}
+
+static inline modq modq_square(modq a)
+{
+  crypto_int32 A = a;
+  return modq_freeze(A * A);
+}
+
+static inline modq modq_sum(modq a,modq b)
+{
+  crypto_int32 A = a;
+  crypto_int32 B = b;
+  return modq_freeze(A + B);
+}
+
+static inline modq modq_reciprocal(modq a1)
+{
+  modq a2 = modq_square(a1);
+  modq a3 = modq_product(a2,a1);
+  modq a4 = modq_square(a2);
+  modq a8 = modq_square(a4);
+  modq a16 = modq_square(a8);
+  modq a32 = modq_square(a16);
+  modq a35 = modq_product(a32,a3);
+  modq a70 = modq_square(a35);
+  modq a140 = modq_square(a70);
+  modq a143 = modq_product(a140,a3);
+  modq a286 = modq_square(a143);
+  modq a572 = modq_square(a286);
+  modq a1144 = modq_square(a572);
+  modq a1147 = modq_product(a1144,a3);
+  modq a2294 = modq_square(a1147);
+  modq a4588 = modq_square(a2294);
+  modq a4589 = modq_product(a4588,a1);
+  return a4589;
+}
+
+static inline modq modq_quotient(modq num,modq den)
+{
+  return modq_product(num,modq_reciprocal(den));
+}
+
 #endif
 
-crypto_int32 small_random32(void)
-{
-#ifdef KAT
-  if (pos == 4*761) {
-    randombytes(x,sizeof x);
-    pos = 0;
-  }
-  pos += 4;
-  return x[pos - 4] + (x[pos - 3] << 8) + (x[pos - 2] << 16) + (x[pos - 1] << 24);
-#else
-  unsigned char x[4];
-  randombytes(x,4);
-  return x[0] + (x[1] << 8) + (x[2] << 16) + (x[3] << 24);
-#endif
-}
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+/* rq.c */
 
 
-void small_random(small *g)
-{
-  int i;
-
-  for (i = 0;i < p;++i) {
-    crypto_uint32 r = small_random32();
-    g[i] = (small) (((1073741823 & r) * 3) >> 30) - 1;
-  }
-}
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
-
-
-void small_random_weightw(small *f)
-{
-  crypto_int32 r[p];
-  int i;
-
-  for (i = 0;i < p;++i) r[i] = small_random32();
-  for (i = 0;i < w;++i) r[i] &= -2;
-  for (i = w;i < p;++i) r[i] = (r[i] & -3) | 1;
-  int32_sort(r,p);
-  for (i = 0;i < p;++i) f[i] = ((small) (r[i] & 3)) - 1;
-}
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
-
-
-void rq_encode(unsigned char *c,const modq *f)
+static void rq_encode(unsigned char *c,const modq *f)
 {
   crypto_int32 f0, f1, f2, f3, f4;
   int i;
@@ -675,7 +540,7 @@ void rq_encode(unsigned char *c,const modq *f)
   *c++ = f0;
 }
 
-void rq_decode(modq *f,const unsigned char *c)
+static void rq_decode(modq *f,const unsigned char *c)
 {
   crypto_uint32 c0, c1, c2, c3, c4, c5, c6, c7;
   crypto_uint32 f0, f1, f2, f3, f4;
@@ -763,10 +628,11 @@ void rq_decode(modq *f,const unsigned char *c)
   c0 += c1 << 8;
   *f++ = modq_freeze(c0 + q - qshift);
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* rq_mult.c */
 
 
-void rq_mult(modq *h,const modq *f,const small *g)
+static void rq_mult(modq *h,const modq *f,const small *g)
 {
   modq fg[p + p - 1];
   modq result;
@@ -793,14 +659,15 @@ void rq_mult(modq *h,const modq *f,const small *g)
   for (i = 0;i < p;++i)
     h[i] = fg[i];
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* rq_recip3.c */
 
 
 /* caller must ensure that x-y does not overflow */
-/*static int smaller_mask(int x,int y)
+static int smaller_maskq(int x,int y)
 {
   return (x - y) >> 31;
-}*/
+}
 
 static void vectormodq_product(modq *z,int len,const modq *x,const modq c)
 {
@@ -827,7 +694,7 @@ or returning -1 if s is not invertible mod m
 r,s are polys of degree <p
 m is x^p-x-1
 */
-int rq_recip3(modq *r,const small *s)
+static int rq_recip3(modq *r,const small *s)
 {
   const int loops = 2*p + 1;
   int loop;
@@ -898,7 +765,7 @@ int rq_recip3(modq *r,const small *s)
 
     ++loop;
 
-    swapmask = smaller_mask(e,d) & modq_nonzero_mask(g[p]);
+    swapmask = smaller_maskq(e,d) & modq_nonzero_mask(g[p]);
     swap(&e,&d,sizeof e,swapmask);
     swap(f,g,(p + 1) * sizeof(modq),swapmask);
 
@@ -915,22 +782,24 @@ int rq_recip3(modq *r,const small *s)
 
   c = modq_reciprocal(f[p]);
   vectormodq_product(r,p,u + p,c);
-  return smaller_mask(0,d);
+  return smaller_maskq(0,d);
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* rq_round3.c */
 
 
-void rq_round3(modq *h,const modq *f)
+static void rq_round3(modq *h,const modq *f)
 {
   int i;
 
   for (i = 0;i < p;++i)
     h[i] = ((21846 * (f[i] + 2295) + 32768) >> 16) * 3 - 2295;
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* rq_rounded.c */
 
 
-void rq_encoderounded(unsigned char *c,const modq *f)
+static void rq_encoderounded(unsigned char *c,const modq *f)
 {
   crypto_int32 f0, f1, f2;
   int i;
@@ -964,7 +833,7 @@ void rq_encoderounded(unsigned char *c,const modq *f)
   *c++ = f0;
 }
 
-void rq_decoderounded(modq *f,const unsigned char *c)
+static void rq_decoderounded(modq *f,const unsigned char *c)
 {
   crypto_uint32 c0, c1, c2, c3;
   crypto_uint32 f0, f1, f2;
@@ -1027,60 +896,263 @@ void rq_decoderounded(modq *f,const unsigned char *c)
   *f++ = modq_freeze(f0 * 3 + q - qshift);
   *f++ = modq_freeze(f1 * 3 + q - qshift);
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* keypair.c */
 
 
-/* XXX: these functions rely on p mod 4 = 1 */
+#if crypto_kem_sntrup4591761_openssh_PUBLICKEYBYTES != rq_encode_len
+#error "crypto_kem_sntrup4591761_openssh_PUBLICKEYBYTES must match rq_encode_len"
+#endif
+#if crypto_kem_sntrup4591761_openssh_SECRETKEYBYTES != rq_encode_len + 2 * small_encode_len
+#error "crypto_kem_sntrup4591761_openssh_SECRETKEYBYTES must match rq_encode_len + 2 * small_encode_len"
+#endif
 
-/* all coefficients in -1, 0, 1 */
-void small_encode(unsigned char *c,const small *f)
+int crypto_kem_sntrup4591761_openssh_keypair(unsigned char *pk,unsigned char *sk)
 {
-  small c0;
-  int i;
+  small g[p];
+  small grecip[p];
+  small f[p];
+  modq f3recip[p];
+  modq h[p];
 
-  for (i = 0;i < p/4;++i) {
-    c0 = *f++ + 1;
-    c0 += (*f++ + 1) << 2;
-    c0 += (*f++ + 1) << 4;
-    c0 += (*f++ + 1) << 6;
-    *c++ = c0;
-  }
-  c0 = *f++ + 1;
-  *c++ = c0;
+  do
+    small_random(g);
+  while (r3_recip(grecip,g) != 0);
+
+  small_random_weightw(f);
+  rq_recip3(f3recip,f);
+
+  rq_mult(h,f3recip,g);
+
+  rq_encode(pk,h);
+  small_encode(sk,f);
+  small_encode(sk + small_encode_len,grecip);
+  memcpy(sk + 2 * small_encode_len,pk,rq_encode_len);
+
+  return 0;
 }
 
-void small_decode(small *f,const unsigned char *c)
+/* enc.c */
+
+#ifdef KAT
+#endif
+
+
+int crypto_kem_sntrup4591761_openssh_enc(
+  unsigned char *cstr,
+  unsigned char *k,
+  const unsigned char *pk
+)
 {
-  unsigned char c0;
-  int i;
+  small r[p];
+  modq h[p];
+  modq c[p];
+  unsigned char rstr[small_encode_len];
+  unsigned char hash[64];
 
-  for (i = 0;i < p/4;++i) {
-    c0 = *c++;
-    *f++ = ((small) (c0 & 3)) - 1; c0 >>= 2;
-    *f++ = ((small) (c0 & 3)) - 1; c0 >>= 2;
-    *f++ = ((small) (c0 & 3)) - 1; c0 >>= 2;
-    *f++ = ((small) (c0 & 3)) - 1;
+  small_random_weightw(r);
+
+#ifdef KAT
+  {
+    int i;
+    printf("encrypt r:");
+    for (i = 0;i < p;++i)
+      if (r[i] == 1) printf(" +%d",i);
+      else if (r[i] == -1) printf(" -%d",i);
+    printf("\n");
   }
-  c0 = *c++;
-  *f++ = ((small) (c0 & 3)) - 1;
+#endif
+
+  small_encode(rstr,r);
+  crypto_hash_sha512(hash,rstr,sizeof rstr);
+
+  rq_decode(h,pk);
+  rq_mult(c,h,r);
+  rq_round3(c,c);
+
+  memcpy(k,hash + 32,32);
+  memcpy(cstr,hash,32);
+  rq_encoderounded(cstr + 32,c);
+
+  return 0;
 }
-/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */
+
+/* dec.c */
+
+#ifdef KAT
+#endif
 
 
-void swap(void *x,void *y,int bytes,int mask)
+int crypto_kem_sntrup4591761_openssh_dec(
+  unsigned char *k,
+  const unsigned char *cstr,
+  const unsigned char *sk
+)
 {
+  small f[p];
+  modq h[p];
+  small grecip[p];
+  modq c[p];
+  modq t[p];
+  small t3[p];
+  small r[p];
+  modq hr[p];
+  unsigned char rstr[small_encode_len];
+  unsigned char hash[64];
   int i;
-  char xi, yi, c, t;
+  int result = 0;
+  int weight;
 
-  c = mask;
-  
-  for (i = 0;i < bytes;++i) {
-    xi = i[(char *) x];
-    yi = i[(char *) y];
-    t = c & (xi ^ yi);
-    xi ^= t;
-    yi ^= t;
-    i[(char *) x] = xi;
-    i[(char *) y] = yi;
+  small_decode(f,sk);
+  small_decode(grecip,sk + small_encode_len);
+  rq_decode(h,sk + 2 * small_encode_len);
+
+  rq_decoderounded(c,cstr + 32);
+
+  rq_mult(t,c,f);
+  for (i = 0;i < p;++i) t3[i] = mod3_freeze(modq_freeze(3*t[i]));
+
+  r3_mult(r,t3,grecip);
+
+#ifdef KAT
+  {
+    int j;
+    printf("decrypt r:");
+    for (j = 0;j < p;++j)
+      if (r[j] == 1) printf(" +%d",j);
+      else if (r[j] == -1) printf(" -%d",j);
+    printf("\n");
   }
+#endif
+
+  weight = 0;
+  for (i = 0;i < p;++i) weight += (1 & r[i]);
+  weight -= w;
+  result |= modq_nonzero_mask(weight); /* XXX: puts limit on p */
+
+  rq_mult(hr,h,r);
+  rq_round3(hr,hr);
+  for (i = 0;i < p;++i) result |= modq_nonzero_mask(hr[i] - c[i]);
+
+  small_encode(rstr,r);
+  crypto_hash_sha512(hash,rstr,sizeof rstr);
+  result |= crypto_verify_32(hash,cstr);
+
+  for (i = 0;i < 32;++i) k[i] = (hash[32 + i] & ~result);
+  return result;
 }
+
+
+#if 0
+Script used for merge into single file:
+
+#!/bin/sh
+
+rm crypto_kem_sntrup4591761.c || :
+
+(
+
+  echo '/*'
+  echo 'Original code: libpqcrypto-20180314/crypto_kem/sntrup4591761/ref'
+  echo 'Modifications (Jan Mojzis):'
+  echo '- source code merged into single file'
+  echo '- crypto_kem renamed to crypto_kem_sntrup4591761_openssh'
+  echo '*/'
+  echo
+  echo '/* See https://ntruprime.cr.yp.to/software.html for detailed documentation. */'
+  echo
+  echo '#include <string.h>'
+  echo '#include "crypto_uint32.h"'
+  echo '#include "crypto_uint16.h"'
+  echo '#include "crypto_int32.h"'
+  echo '#include "crypto_int16.h"'
+  echo '#include "crypto_int8.h"'
+  echo '#include "randombytes.h"'
+  echo '#include "crypto_verify_32.h"'
+  echo '#include "crypto_hash_sha512.h"'
+  echo '#include "crypto_kem_sntrup4591761.h"'
+  echo
+  (
+    echo '/* int32_sort.c */'
+    cat int32_sort.c | sed 's/^void /static void /'
+    echo
+
+    echo '/* swap.c */'
+    cat swap.c | sed 's/^void /static void /'
+    echo
+
+    echo '/* params.h */'
+    cat params.h 
+    echo
+
+    echo '/* small.h */'
+    echo 'typedef crypto_int8 small;'
+    echo 
+    echo '/* small.c */'
+    cat small.c | sed 's/^void /static void /'
+    echo
+    echo '/* random32.c */'
+    cat random32.c | sed 's/^crypto_int32 /static crypto_int32 /'
+    echo
+    echo '/* randomsmall.c */'
+    cat randomsmall.c | sed 's/^void /static void /'
+    echo
+    echo '/* randomweightw.c */'
+    cat randomweightw.c | sed 's/^void /static void /'
+    echo
+
+    echo '/* mod3.h */'
+    cat mod3.h
+    echo
+    echo '/* r3_mult.c */'
+    cat r3_mult.c | sed 's/^void /static void /'
+    echo
+    echo '/* r3_recip.c */'
+    cat r3_recip.c | sed 's/^void /static void /'
+    echo
+
+    echo '/* modq.h */'
+    cat modq.h
+    echo
+    echo '/* rq.c */'
+    cat rq.c | sed 's/^void /static void /'
+    echo
+    echo '/* rq_mult.c */'
+    cat rq_mult.c | sed 's/^void /static void /'
+    echo
+    echo '/* rq_recip3.c */'
+    cat rq_recip3.c | sed 's/smaller_mask/smaller_maskq/' | sed 's/^int /static int /'
+    echo
+    echo '/* rq_round3.c */'
+    cat rq_round3.c | sed 's/^void /static void /'
+    echo
+    echo '/* rq_rounded.c */'
+    cat rq_rounded.c | sed 's/^void /static void /'
+    echo
+
+    (
+      echo '/* keypair.c */'
+      cat keypair.c
+      echo
+      echo '/* enc.c */'
+      cat enc.c
+      echo
+      echo '/* dec.c */'
+      cat dec.c
+      echo
+    ) | sed 's/crypto_kem/crypto_kem_sntrup4591761_openssh/g'
+
+  ) | grep -v '^#include' | grep -v 'See https://ntruprime.cr.yp.to/software.html for detailed documentation'
+
+  echo
+  echo '#if 0'
+  echo 'Script used for merge into single file:'
+  echo
+  cat $0
+  echo
+  echo '#endif'
+
+) > crypto_kem_sntrup4591761.c.tmp
+mv -f crypto_kem_sntrup4591761.c.tmp crypto_kem_sntrup4591761.c
+
+#endif
